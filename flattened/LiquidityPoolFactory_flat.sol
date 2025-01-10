@@ -1,4 +1,8 @@
+// Sources flattened with hardhat v2.22.17 https://hardhat.org
 
+// SPDX-License-Identifier: MIT
+
+// File @chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol@v0.8.0
 
 // Original license: SPDX_License_Identifier: MIT
 pragma solidity ^0.8.0;
@@ -18,6 +22,72 @@ interface AggregatorV3Interface {
     external
     view
     returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);
+}
+
+
+// File @openzeppelin/contracts/security/ReentrancyGuard.sol@v4.3.3
+
+// Original license: SPDX_License_Identifier: MIT
+
+pragma solidity ^0.8.0;
+
+/**
+ * @dev Contract module that helps prevent reentrant calls to a function.
+ *
+ * Inheriting from `ReentrancyGuard` will make the {nonReentrant} modifier
+ * available, which can be applied to functions to make sure there are no nested
+ * (reentrant) calls to them.
+ *
+ * Note that because there is a single `nonReentrant` guard, functions marked as
+ * `nonReentrant` may not call one another. This can be worked around by making
+ * those functions `private`, and then adding `external` `nonReentrant` entry
+ * points to them.
+ *
+ * TIP: If you would like to learn more about reentrancy and alternative ways
+ * to protect against it, check out our blog post
+ * https://blog.openzeppelin.com/reentrancy-after-istanbul/[Reentrancy After Istanbul].
+ */
+abstract contract ReentrancyGuard {
+    // Booleans are more expensive than uint256 or any type that takes up a full
+    // word because each write operation emits an extra SLOAD to first read the
+    // slot's contents, replace the bits taken up by the boolean, and then write
+    // back. This is the compiler's defense against contract upgrades and
+    // pointer aliasing, and it cannot be disabled.
+
+    // The values being non-zero value makes deployment a bit more expensive,
+    // but in exchange the refund on every call to nonReentrant will be lower in
+    // amount. Since refunds are capped to a percentage of the total
+    // transaction's gas, it is best to keep them low in cases like this one, to
+    // increase the likelihood of the full refund coming into effect.
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+
+    uint256 private _status;
+
+    constructor() {
+        _status = _NOT_ENTERED;
+    }
+
+    /**
+     * @dev Prevents a contract from calling itself, directly or indirectly.
+     * Calling a `nonReentrant` function from another `nonReentrant`
+     * function is not supported. It is possible to prevent this from happening
+     * by making the `nonReentrant` function external, and make it call a
+     * `private` function that does the actual work.
+     */
+    modifier nonReentrant() {
+        // On the first call to nonReentrant, _notEntered will be true
+        require(_status != _ENTERED, "ReentrancyGuard: reentrant call");
+
+        // Any calls to nonReentrant after this point will fail
+        _status = _ENTERED;
+
+        _;
+
+        // By storing the original value once again, a refund is triggered (see
+        // https://eips.ethereum.org/EIPS/eip-2200)
+        _status = _NOT_ENTERED;
+    }
 }
 
 
@@ -336,27 +406,29 @@ library SafeMath {
 }
 
 
-// File contracts/LiquidityPool.sol
+// File contracts/LiquidityPoolFactory.sol
 
 // Original license: SPDX_License_Identifier: MIT
 pragma solidity ^0.8.0;
 
 
 
-contract LiquidityPool {
+
+// Liquidity Pool Contract
+contract LiquidityPool is ReentrancyGuard {
     using SafeMath for uint256;
 
-    address public owner; // Owner of the liquidity pool
-    address public collateralToken; // Collateral token address
-    address public debtToken; // Debt token address
-    AggregatorV3Interface public collateralPriceFeed; // Chainlink price feed for collateral
-    AggregatorV3Interface public debtPriceFeed; // Chainlink price feed for debt token
+    address public owner;
+    address public collateralToken;
+    address public debtToken;
+    AggregatorV3Interface public collateralPriceFeed;
+    AggregatorV3Interface public debtPriceFeed;
 
-    uint256 public depositInterestRate; // Deposit interest rate (per year, in basis points)
-    uint256 public borrowInterestRate; // Borrow interest rate (per year, in basis points)
-    uint256 public ltvRatio; // Loan-to-value ratio (in basis points, e.g., 8000 = 80%)
-    uint256 public liquidationThreshold; // Liquidation threshold (in basis points)
-    uint256 public liquidationBonus; // Liquidation bonus (in basis points)
+    uint256 public depositInterestRate;
+    uint256 public borrowInterestRate;
+    uint256 public ltvRatio;
+    uint256 public liquidationThreshold;
+    uint256 public liquidationBonus;
 
     struct User {
         uint256 collateralBalance;
@@ -372,6 +444,17 @@ contract LiquidityPool {
     event Repay(address indexed user, uint256 amount);
     event Liquidate(address indexed liquidator, address indexed borrower, uint256 repaidAmount, uint256 collateralSeized);
     event WithdrawInterest(address indexed user, uint256 interestAmount);
+
+    error OnlyOwner();
+    error InvalidAmount();
+    error InsufficientCollateral();
+    error UndercollateralizedPosition();
+    error NoInterestToWithdraw();
+
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert OnlyOwner();
+        _;
+    }
 
     constructor(
         address _collateralToken,
@@ -397,13 +480,8 @@ contract LiquidityPool {
         owner = _owner;
     }
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Only the owner can perform this action");
-        _;
-    }
-
-    function deposit(uint256 amount) external {
-        require(amount > 0, "Deposit amount must be greater than zero");
+    function deposit(uint256 amount) external nonReentrant {
+        if (amount == 0) revert InvalidAmount();
         IERC20(collateralToken).transferFrom(msg.sender, address(this), amount);
 
         User storage user = users[msg.sender];
@@ -415,19 +493,19 @@ contract LiquidityPool {
         emit Deposit(msg.sender, amount);
     }
 
-    function addLiquidity(uint256 amount) external onlyOwner {
-        require(amount > 0, "Liquidity amount must be greater than zero");
+    function addLiquidity(uint256 amount) external onlyOwner nonReentrant {
+        if (amount == 0) revert InvalidAmount();
         IERC20(debtToken).transferFrom(msg.sender, address(this), amount);
     }
 
-    function borrow(uint256 amount) external {
-        require(amount > 0, "Borrow amount must be greater than zero");
+    function borrow(uint256 amount) external nonReentrant {
+        if (amount == 0) revert InvalidAmount();
 
         User storage user = users[msg.sender];
         uint256 collateralValue = calculateCollateralValue(msg.sender);
         uint256 maxBorrowable = collateralValue.mul(ltvRatio).div(10000);
 
-        require(user.debtBalance.add(amount) <= maxBorrowable, "Insufficient collateral");
+        if (user.debtBalance.add(amount) > maxBorrowable) revert InsufficientCollateral();
 
         user.debtBalance = user.debtBalance.add(amount);
         IERC20(debtToken).transfer(msg.sender, amount);
@@ -435,11 +513,11 @@ contract LiquidityPool {
         emit Borrow(msg.sender, amount);
     }
 
-    function repay(uint256 amount) external {
-        require(amount > 0, "Repay amount must be greater than zero");
+    function repay(uint256 amount) external nonReentrant {
+        if (amount == 0) revert InvalidAmount();
 
         User storage user = users[msg.sender];
-        require(user.debtBalance >= amount, "Repay amount exceeds debt balance");
+        if (user.debtBalance < amount) revert InvalidAmount();
 
         IERC20(debtToken).transferFrom(msg.sender, address(this), amount);
         user.debtBalance = user.debtBalance.sub(amount);
@@ -447,17 +525,15 @@ contract LiquidityPool {
         emit Repay(msg.sender, amount);
     }
 
-    function liquidate(address borrower) external {
+    function liquidate(address borrower) external nonReentrant {
         User storage user = users[borrower];
         uint256 collateralValue = calculateCollateralValue(borrower);
         uint256 borrowedValue = calculateBorrowedValue(borrower);
 
-        require(
-            collateralValue.mul(liquidationThreshold).div(10000) < borrowedValue,
-            "Borrower's position is not undercollateralized"
-        );
+        if (collateralValue.mul(liquidationThreshold).div(10000) >= borrowedValue)
+            revert UndercollateralizedPosition();
 
-        uint256 maxRepayable = borrowedValue.div(2); // Liquidators can repay up to 50% of the debt
+        uint256 maxRepayable = borrowedValue.div(2);
         uint256 collateralSeized = maxRepayable.mul(10000 + liquidationBonus).div(10000);
 
         IERC20(debtToken).transferFrom(msg.sender, address(this), maxRepayable);
@@ -467,6 +543,26 @@ contract LiquidityPool {
         user.collateralBalance = user.collateralBalance.sub(collateralSeized);
 
         emit Liquidate(msg.sender, borrower, maxRepayable, collateralSeized);
+    }
+
+    function withdrawInterest() external nonReentrant {
+        User storage user = users[msg.sender];
+        _updateDepositInterest(msg.sender);
+
+        uint256 interestToWithdraw = user.accruedInterest;
+        if (interestToWithdraw == 0) revert NoInterestToWithdraw();
+
+        user.accruedInterest = 0;
+        IERC20(debtToken).transfer(msg.sender, interestToWithdraw);
+
+        emit WithdrawInterest(msg.sender, interestToWithdraw);
+    }
+
+    function _updateDepositInterest(address userAddress) internal {
+        User storage user = users[userAddress];
+        uint256 newInterest = calculateDepositInterest(userAddress);
+        user.accruedInterest = user.accruedInterest.add(newInterest);
+        user.depositTimestamp = block.timestamp;
     }
 
     function calculateCollateralValue(address userAddress) public view returns (uint256) {
@@ -490,45 +586,28 @@ contract LiquidityPool {
         return annualInterest.mul(timeElapsed).div(365 days);
     }
 
-    function withdrawInterest() external {
-        User storage user = users[msg.sender];
-        _updateDepositInterest(msg.sender);
-
-        uint256 interestToWithdraw = user.accruedInterest;
-        require(interestToWithdraw > 0, "No interest to withdraw");
-
-        user.accruedInterest = 0;
-        IERC20(debtToken).transfer(msg.sender, interestToWithdraw);
-
-        emit WithdrawInterest(msg.sender, interestToWithdraw);
-    }
-
-    function _updateDepositInterest(address userAddress) internal {
-        User storage user = users[userAddress];
-        uint256 newInterest = calculateDepositInterest(userAddress);
-        user.accruedInterest = user.accruedInterest.add(newInterest);
-        user.depositTimestamp = block.timestamp;
-    }
-
     function updateInterestRates(uint256 _depositInterestRate, uint256 _borrowInterestRate) external onlyOwner {
         depositInterestRate = _depositInterestRate;
         borrowInterestRate = _borrowInterestRate;
     }
 }
 
+// Factory Contract
+contract LiquidityPoolFactory {
+    address public owner;
+    address[] public allPools;
 
-// File contracts/LiquidityPoolFactory.sol
+    event PoolCreated(address indexed poolAddress, address indexed creator);
 
-// Original license: SPDX_License_Identifier: MIT
-pragma solidity ^0.8.0;
-
-    constructor() {
-        owner = msg.sender; // Set the deployer as the owner
-    }
+    error OnlyOwner();
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "Only the owner can perform this action");
+        if (msg.sender != owner) revert OnlyOwner();
         _;
+    }
+
+    constructor() {
+        owner = msg.sender;
     }
 
     function createPool(
@@ -552,11 +631,11 @@ pragma solidity ^0.8.0;
             ltvRatio,
             liquidationThreshold,
             liquidationBonus,
-            msg.sender // Set the factory owner as the pool owner
+            msg.sender
         );
 
-        allPools.push(address(newPool)); // Store the address of the new pool
-        emit PoolCreated(address(newPool), msg.sender); // Emit event
+        allPools.push(address(newPool));
+        emit PoolCreated(address(newPool), msg.sender);
     }
 
     function getAllPools() external view returns (address[] memory) {
