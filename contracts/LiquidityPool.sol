@@ -35,6 +35,7 @@ contract LiquidityPool is ReentrancyGuard {
     event Repay(address indexed user, uint256 amount);
     event Liquidate(address indexed liquidator, address indexed borrower, uint256 repaidAmount, uint256 collateralSeized);
     event WithdrawInterest(address indexed user, uint256 interestAmount);
+    event LiquidityProvided(address indexed owner, uint256 amount);
 
     error OnlyOwner();
     error InvalidAmount();
@@ -142,6 +143,14 @@ contract LiquidityPool is ReentrancyGuard {
         IERC20(debtToken).transfer(msg.sender, interestToWithdraw);
 
         emit WithdrawInterest(msg.sender, interestToWithdraw);
+    }
+
+    function provideDebtLiquidity(uint256 amount) external onlyOwner nonReentrant {
+        if (amount == 0) revert InvalidAmount();
+
+        IERC20(debtToken).transferFrom(msg.sender, address(this), amount);
+
+        emit LiquidityProvided(msg.sender, amount);
     }
 
     function _updateDepositInterest(address userAddress) internal {
